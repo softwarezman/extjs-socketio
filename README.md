@@ -3,6 +3,8 @@ extjs-socketio
 
 ExtJS 4 Socket.io support code to allow additional plugins to interact with the Socket.io client JavaScript package
 
+Originally based on examples provided by Bryntum's Scheduler blog: http://bryntum.com/blog/nodejs-ext-scheduler-realtime-updates/
+
 How it works:
 Listens for socket.io messages (currently defined as: server-doInitialLoad, server-doUpdate, server-doAdd, server-syncId, server-doRemove)
 at which point it will process the incoming data based on the event to add records, remove records, or update records. It also has a 'highlight'
