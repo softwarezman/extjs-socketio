@@ -3,6 +3,7 @@ Ext.define('Ext.ux.SocketIO', {
     owner: null,
 
     constructor: function(config){
+    	var me = this;
 		//See if this can be swapped from Ext.ux.SocketIO to 'this'
         Ext.ux.SocketIO.superclass.constructor.call(
             this
@@ -11,31 +12,29 @@ Ext.define('Ext.ux.SocketIO', {
         this.socket = io.connect(config.host, {
 			port: config.port
 		});
-		
-		/*this.socket.on('connect', function() {
-			console.log('Connected to Socket.io server');
-		});
-		
-		this.socket.on('disconnect', function() {
-			console.log('Disconnected from Socket.io server');
-		});*/
-		
-        var that = this;
-
+        
+        this.socket.on('connect', function() {
+        	me.fireEvent('socketconnect', me, this, arguments);
+        });
+        
+        this.socket.on('disconnect', function() {
+        	me.fireEvent('socketdisconnect', me, this, arguments);
+        });
+				
         this.socket.on('server-doInitialLoad', function(data){
-            that.onInitialLoad(data);
+            me.onInitialLoad(data);
         });
         this.socket.on('server-doUpdate', function(data){
-            that.onUpdate(data);
+            me.onUpdate(data);
         });
         this.socket.on('server-doAdd', function(data){
-            that.onAdd(data);
+            me.onAdd(data);
         });
         this.socket.on('server-syncId', function(data){
-            that.syncId(data);
+            me.syncId(data);
         });
         this.socket.on('server-doRemove', function(data){
-            that.onRemove(data);
+            me.onRemove(data);
         });                                
     },
 
