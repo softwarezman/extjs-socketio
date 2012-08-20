@@ -1,41 +1,87 @@
 Ext.define('Ext.ux.SocketIO', {
 	extend: 'Ext.util.Observable',
     owner: null,
-
+    
+    /**
+     * An empty function by default, but provided so that you can perform custom
+     * record validations before they are added to the store
+     * @param {String} Type of event that is calling the function (update, add, remove)
+     * @param {Ext.data.Model} The model that needs to be validated
+     * @method validateRecords
+     */
+    validateRecords: Ext.emptyFn,
+    
+    /**
+     * What the connection should do if the validation fails.
+     * Defaults to '' which means it leaves the record alone.
+     * Other supported option is 'remove' which will remove the record completely from the store
+     */
+    validationFailureAction: '',
+    
     constructor: function(config){
     	var me = this;
 		//See if this can be swapped from Ext.ux.SocketIO to 'this'
-        Ext.ux.SocketIO.superclass.constructor.call(
+        me.superclass.constructor.call(
             this
         );
-
-        this.socket = io.connect(config.host, {
-			port: config.port
+        
+        me.validateRecords = config.validateRecords || me.validateRecords;
+        me.validationFailureAction = config.validationFailureAction || me.validationFailureAction;
+        
+        me.socket = io.connect(config.host, {
+			port: config.port,
+			reconnect: config.reconnect,
+			'reconnection delay': config['reconnection delay'],
+			'max reconnection attempts': config['max reconnection attemps'],
+			'transports': ['websocket','flashsocket','htmlfile','xhr-multipart', 'xhr-polling']
 		});
         
-        this.socket.on('connect', function() {
+        me.socket.on('connect', function() {
         	me.fireEvent('socketconnect', me, this, arguments);
         });
         
-        this.socket.on('disconnect', function() {
+        me.socket.on('disconnect', function() {
         	me.fireEvent('socketdisconnect', me, this, arguments);
         });
 				
-        this.socket.on('server-doInitialLoad', function(data){
+        me.socket.on('server-doInitialLoad', function(data){
             me.onInitialLoad(data);
         });
-        this.socket.on('server-doUpdate', function(data){
+        me.socket.on('server-doUpdate', function(data){
             me.onUpdate(data);
         });
-        this.socket.on('server-doAdd', function(data){
+        me.socket.on('server-doAdd', function(data){
             me.onAdd(data);
         });
-        this.socket.on('server-syncId', function(data){
+        me.socket.on('server-syncId', function(data){
             me.syncId(data);
         });
-        this.socket.on('server-doRemove', function(data){
+        me.socket.on('server-doRemove', function(data){
             me.onRemove(data);
         });                                
+    },
+    
+    initComponent: function() {
+    	var me = this;
+    	me.addEvents(
+    		/**
+    		 * @event socketconnect
+    		 * Fires when the component has connected the backend server
+    		 * @param {Socket.IO} This
+    		 * @param {Event} connect event details
+    		 * @param {Object} Arguments passed to the connect string
+    		 */
+    		'socketconnect', 
+    		/**
+    		 * @event socketdisconnect
+    		 * Fires when the component has been disconnected from the backend server
+    		 * @param {Socket.IO} This
+    		 * @param {Event} connect event details
+    		 * @param {Object} Arguments passed to the connect string
+    		 */
+    		'socketdisconnect');
+    	
+    	me.callParent();
     },
 
     /** 
@@ -73,6 +119,7 @@ Ext.define('Ext.ux.SocketIO', {
             record,
 			records = [],
 			view = this.owner.getView(),
+			fAct = this.validationFailureAction,
             current;                    
 		
 		if(this.getStoreByType(storeType)) {
@@ -95,30 +142,25 @@ Ext.define('Ext.ux.SocketIO', {
 	            delete current.internalId;
 				
 				record = new store.model(current);
-				//console.log(record);
 				
-				records.push(record);
-	            //change dates from JSON form to Date
-	            //current.startDate = new Date(current.StartDate);
-	            //current.endDate   = new Date(current.EndDate);
-	            
-	            store.insert(0, record);	
+				if(this.validateRecords('update', record) !== false) {
+					records.push(record);
+		            store.insert(0, record);
+				} //We don't do anything if they fail since it just won't add the record
 			}
-                                            
         }
 
         //resume events => refreshing views
 		store.resumeAutoSync();
         store.resumeEvents();
-		
-		store.fireEvent('socketAdd', store, records, arguments);
-		
-        //this.owner.getView().refreshKeepingScroll();
-		this.refreshView(view);
-		this.applyEffect(records);
-		
-		
-		
+        
+        this.refreshView(view);
+        
+		if(records.length > 0) {
+			store.fireEvent('socketAdd', store, records, arguments);
+			
+			this.applyEffect(records);
+		}
     },
 	
 	/** 
@@ -175,8 +217,8 @@ Ext.define('Ext.ux.SocketIO', {
             data      = data.records,
             record,
 			records = [],
-			node,
             current,
+            fAct = this.validationFailureAction,
 			store, modelIdProperty;            
 		
 		if(this.getStoreByType(storeType)) {
@@ -196,26 +238,35 @@ Ext.define('Ext.ux.SocketIO', {
 			
             record = store.getById(current[modelIdProperty]);
             if (record) {
-                //current.startDate && (current.StartDate = new Date(current.StartDate));
-                //current.endDate && (current.endDate   = new Date(current.EndDate));
-                record.set(current);
-
-				/**
-				 * If you don't set dirty = false it will try and submit
-				 * an update with this record the next time you update any other record 
-				 */
-				record.dirty = false;
-				records.push(record);            
+                current.startDate && (current.StartDate = new Date(current.StartDate));
+                current.endDate && (current.endDate   = new Date(current.EndDate));
+            	
+                if(this.validateRecords('update', Ext.create(record.modelName, current)) !== false) {
+                	record.set(current);
+                	/**
+    				 * If you don't set dirty = false it will try and submit
+    				 * an update with this record the next time you update any other record 
+    				 */
+    				record.dirty = false;
+    				records.push(record);
+                } else {
+					if(fAct === 'remove') {
+						store.remove(record);
+					}
+				}
             }
         }
 
-		store.resumeAutoSync();
+		
+        store.resumeAutoSync();
         store.resumeEvents();
-		
-		store.fireEvent('socketUpdate', store, records, arguments);
-		
-		this.refreshView();
-		this.applyEffect(records);
+        
+        this.refreshView();
+        
+		if(records.length > 0) {
+			store.fireEvent('socketUpdate', store, records, arguments);
+			this.applyEffect(records);
+		} 
     },
 
     /** 
@@ -249,7 +300,7 @@ Ext.define('Ext.ux.SocketIO', {
             data      = data.records,
             record,
 			records = [],
-            current;
+            current; 
 		
 		if(this.getStoreByType(storeType)) {
 			store     = this.getStoreByType(storeType),
@@ -264,21 +315,26 @@ Ext.define('Ext.ux.SocketIO', {
         for(var i=0, l=data.length; i<l; i+=1){
             current = data[i].data;
             record = store.getById(current);
-			
-            store.remove(record);
-			
-			records.push(record);
-			/**
-			 * Clear out the removed records as they have already been deleted by the
-			 * original client
-			 */          
-			store.removed = [];
+            
+            if(this.validateRecords('update', record) !== false) {
+            	store.remove(record);
+    			records.push(record);
+            } //We don't have to do anything else since they didn't update any data but just tried to delete it
         }
-		
-		store.resumeAutoSync();
+        
+        store.resumeAutoSync();
         store.resumeEvents();
-		store.fireEvent('socketRemove', store, records, arguments);
-		this.refreshView();
+        
+        this.refreshView();
+        
+        /**
+		 * Clear out the removed records as they have already been deleted by the
+		 * original client
+		 */
+        if(records.length > 0) {
+        	store.removed = [];
+        	store.fireEvent('socketRemove', store, records, arguments);
+        }
 		//this.applyEffect(records);
     },
 
